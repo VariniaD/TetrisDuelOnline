@@ -33,7 +33,9 @@ class GameViewModel : ViewModel() {
             )
 
             _state.value = _state.value.copy(
-                roomCode = roomId
+                roomCode = roomId,
+                connectionStatus = "Sala creada",
+                message = "Sala creada. Esperando al segundo jugador...."
             )
         }
         socketRepository.onGameStart {
@@ -44,12 +46,19 @@ class GameViewModel : ViewModel() {
             _state.value = _state.value.copy(
                 opponentConnected = true,
                 isRunning = false,
-                message = "Partida iniciada"
+                connectionStatus = "Partida iniciada",
+                message = "Ambos jugadores conectados. Iniciamos partida..."
+
             )
 
             startGame()
         }
         socketRepository.onReceiveAttack { lines ->
+
+            android.util.Log.d(
+                "SOCKET_ATTACK",
+                "Ataque recibido desde socket: $lines línea(s)"
+            )
 
             receiveGarbage(lines)
         }
@@ -138,6 +147,20 @@ class GameViewModel : ViewModel() {
             message = "Partida pausada"
         )
     }
+
+    fun resetGame() {
+        autoDropJob?.cancel()
+        autoDropJob = null
+
+        timerJob?.cancel()
+        timerJob = null
+
+        _state.value = GameState(
+            connectionStatus = "Conectado",
+            message = "Listo para crear o unirse a una sala"
+        )
+    }
+
 
     private fun startAutoDrop() {
         autoDropJob?.cancel()
@@ -401,6 +424,8 @@ class GameViewModel : ViewModel() {
             linesCleared = cleanResult.linesCleared
         )
 
+        sendAttackIfNeeded(attack)
+
         // Calculamos cuál será la siguiente prueba.
         //
         // Si ahora probamos 1, la próxima será 2.
@@ -421,14 +446,37 @@ class GameViewModel : ViewModel() {
             message = "Prueba: ${cleanResult.linesCleared} línea(s), ataque $attack"
         )
     }
-    // Fija la pieza actual dentro del tablero.
-//
-// Esta función coordina varias reglas:
-// 1. Colocar la pieza en el tablero.
-// 2. Eliminar líneas normales completas.
-// 3. Calcular ataque.
-// 4. Crear una nueva pieza.
-// 5. Detectar si el jugador perdió.
+
+    private fun sendAttackIfNeeded(attack: Int) {
+        val currentState = _state.value
+
+        if (attack <= 0) {
+            android.util.Log.d(
+                "SOCKET_ATTACK",
+                "No se envía ataque porque attack = $attack"
+            )
+            return
+        }
+
+        if (currentState.roomCode.isBlank()) {
+            android.util.Log.d(
+                "SOCKET_ATTACK",
+                "No se envía ataque porque no hay código de sala"
+            )
+            return
+        }
+
+        android.util.Log.d(
+            "SOCKET_ATTACK",
+            "Enviando ataque de $attack línea(s) a la sala ${currentState.roomCode}"
+        )
+
+        socketRepository.sendAttack(
+            roomId = currentState.roomCode,
+            garbageLines = attack
+        )
+    }
+
     private fun fixPieceToBoard() {
         val currentState = _state.value
 
@@ -455,10 +503,11 @@ class GameViewModel : ViewModel() {
 
         if (attack > 0 && currentState.roomCode.isNotEmpty()) {
 
-            socketRepository.sendAttack(
-                roomId = currentState.roomCode,
-                garbageLines = attack
+            val attack = TetrisEngine.calculateAttack(
+                linesCleared = cleanResult.linesCleared
             )
+
+            sendAttackIfNeeded(attack)
         }
 
         if (!TetrisEngine.isValidPosition(newCurrentPiece, cleanResult.board)) {
@@ -544,6 +593,13 @@ class GameViewModel : ViewModel() {
     }
 
     fun createRoom() {
+        _state.value = _state.value.copy(
+            roomCode = "",
+            opponentConnected = false,
+            connectionStatus = "Creando sala...",
+            message = "Solicitando código de sala al servidor..."
+        )
+
         socketRepository.createRoom()
     }
 
@@ -551,13 +607,23 @@ class GameViewModel : ViewModel() {
         roomCode: String
     ) {
 
-        if (roomCode.isBlank()) return
+        val cleanRoomCode = roomCode.trim().uppercase()
+
+        if (cleanRoomCode.isBlank()) {
+            _state.value = _state.value.copy(
+                message = "Debe ingresar un código de sala"
+            )
+            return
+        }
 
         _state.value = _state.value.copy(
-            roomCode = roomCode
+            roomCode = cleanRoomCode,
+            opponentConnected = false,
+            connectionStatus = "Uniéndose a sala...",
+            message = "Intentando unirse a la sala $cleanRoomCode"
         )
 
-        socketRepository.joinRoom(roomCode)
+        socketRepository.joinRoom(cleanRoomCode)
     }
 
     override fun onCleared() {
