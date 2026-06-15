@@ -180,10 +180,6 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    // Inicia el contador de duración de la partida.
-//
-// Cada segundo aumenta durationSeconds.
-// También activa el mensaje especial cuando llega a 37 segundos.
     private fun startTimer() {
         timerJob?.cancel()
 
@@ -208,7 +204,7 @@ class GameViewModel : ViewModel() {
         }
     }
 
-//Izquierda
+
     fun moveLeft() {
         val currentState = _state.value
 
@@ -227,7 +223,6 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    //Derecha
     fun moveRight() {
         val currentState = _state.value
 
@@ -246,7 +241,6 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    // Baja la pieza una fila.
     fun softDrop() {
         val currentState = _state.value
 
@@ -267,7 +261,6 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    // Caída instantánea.
     fun hardDrop() {
         val currentState = _state.value
 
@@ -296,7 +289,6 @@ class GameViewModel : ViewModel() {
     }
 
 
-// Rota la pieza actual.
     fun rotate() {
         val currentState = _state.value
 
@@ -321,10 +313,6 @@ class GameViewModel : ViewModel() {
         receiveGarbage(1)
     }
 
-    // Recibe líneas basura.
-//
-// Esta función queda lista para que luego tu compañera la conecte
-// con el evento receive_attack de Socket.IO.
     fun receiveGarbage(lines: Int) {
         val currentState = _state.value
 
@@ -374,25 +362,6 @@ class GameViewModel : ViewModel() {
     }
 
 
-    // Función temporal para probar eliminación de líneas.
-//
-// Llena dos filas con bloques normales.
-// Luego usa el motor real para limpiar líneas,
-// calcular puntaje y calcular ataque.
-    // Función temporal para probar eliminación de líneas.
-//
-// Esta función sirve para validar la tabla de ataques del práctico.
-// Cada vez que se presiona el botón, prueba una cantidad distinta:
-//
-// 1 línea  -> ataque 0
-// 2 líneas -> ataque 1
-// 3 líneas -> ataque 2
-// 4 líneas -> ataque 4
-//
-// Luego vuelve a 1.
-//
-// Esta función es solo para pruebas locales.
-// En la versión final puede quitarse o dejarse oculta.
     fun testClearLines() {
         val currentState = _state.value
 
@@ -402,34 +371,26 @@ class GameViewModel : ViewModel() {
             row.toMutableList()
         }.toMutableList()
 
-        // Tomamos la cantidad de líneas que corresponde probar ahora.
+
         val testLines = currentState.testLinesToClear
 
-        // Llenamos desde abajo la cantidad de filas indicadas.
-        //
-        // Usamos valor 1 porque son bloques normales eliminables.
         for (i in 0 until testLines) {
             val rowIndex = TetrisEngine.BOARD_HEIGHT - 1 - i
 
             mutableBoard[rowIndex] = MutableList(TetrisEngine.BOARD_WIDTH) { 1 }
         }
 
-        // Usamos el motor real para limpiar líneas.
+
         val cleanResult = TetrisEngine.clearCompletedLines(
             board = mutableBoard.map { row -> row.toList() }
         )
 
-        // Calculamos el ataque según la tabla del práctico.
         val attack = TetrisEngine.calculateAttack(
             linesCleared = cleanResult.linesCleared
         )
 
         sendAttackIfNeeded(attack)
 
-        // Calculamos cuál será la siguiente prueba.
-        //
-        // Si ahora probamos 1, la próxima será 2.
-        // Si ahora probamos 4, volvemos a 1.
         val nextTestLines = if (testLines >= 4) {
             1
         } else {

@@ -24,17 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.tetrisduelonline.ui.viewmodels.GameViewModel
-import androidx.compose.runtime.LaunchedEffect
 
-// GameScreen muestra la pantalla local de prueba.
-//
-// En esta versión:
-// - El tablero tiene prioridad visual.
-// - Los botones de iniciar, pausar, reiniciar y basura están al costado.
-// - Los botones de movimiento están debajo del tablero.
-// - Los botones tienen tamaño fijo para que las flechas se vean completas.
 @Composable
 fun GameScreen(
     modifier: Modifier = Modifier,
@@ -47,20 +38,17 @@ fun GameScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            // Mantenemos scroll por seguridad en pantallas pequeñas.
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 
-        // Título compacto para no quitar espacio al tablero.
+
         Text(
             text = "Tetris Duel Online",
             style = MaterialTheme.typography.titleMedium
         )
 
-        // Información principal de la partida.
-        // Esto sí se mantiene arriba porque es útil mientras se juega.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,8 +78,6 @@ fun GameScreen(
             )
         }
 
-        // Zona principal:
-        // tablero a la izquierda y botones generales al costado derecho.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -100,10 +86,7 @@ fun GameScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
 
-            // Tablero principal.
-            //
-            // El 0.72f ayuda a que el tablero entre mejor en Pixel 2 XL.
-            // Si quieres verlo un poco más grande, prueba con 0.74f.
+
             TetrisBoard(
                 board = state.board,
                 currentPiece = state.currentPieceCells,

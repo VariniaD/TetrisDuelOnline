@@ -8,7 +8,7 @@ import android.util.Log
 class SocketRepository {
 
     private val socket: Socket =
-        IO.socket("http://192.168.0.100:3000")
+        IO.socket("http://192.168.1.120:3000")
 
     fun connect() {
 
