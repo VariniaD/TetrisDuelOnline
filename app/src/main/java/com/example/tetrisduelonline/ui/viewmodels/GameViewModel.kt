@@ -1,0 +1,573 @@
+package com.example.tetrisduelonline.ui.viewmodels
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.tetrisduelonline.game.FallingPiece
+import com.example.tetrisduelonline.ui.states.GameState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlin.random.Random
+import com.example.tetrisduelonline.game.TetrisEngine
+import com.example.tetrisduelonline.data.repositories.SocketRepository
+
+class GameViewModel : ViewModel() {
+
+
+    private val socketRepository = SocketRepository()
+
+    init {
+
+        android.util.Log.d("TETRIS", "VIEWMODEL INICIADO")
+
+        socketRepository.connect()
+
+        socketRepository.onRoomCreated { roomId ->
+
+            android.util.Log.d(
+                "SOCKET",
+                "ROOM ID = $roomId"
+            )
+
+            _state.value = _state.value.copy(
+                roomCode = roomId
+            )
+        }
+        socketRepository.onGameStart {
+
+            autoDropJob?.cancel()
+            timerJob?.cancel()
+
+            _state.value = _state.value.copy(
+                opponentConnected = true,
+                isRunning = false,
+                message = "Partida iniciada"
+            )
+
+            startGame()
+        }
+        socketRepository.onReceiveAttack { lines ->
+
+            receiveGarbage(lines)
+        }
+
+        socketRepository.onVictory {
+
+            viewModelScope.launch {
+
+                autoDropJob?.cancel()
+                autoDropJob = null
+
+                timerJob?.cancel()
+                timerJob = null
+
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    isGameOver = true,
+                    winner = "Victoria",
+                    message = "Ganaste"
+                )
+            }
+        }
+
+        socketRepository.onOpponentDisconnected {
+
+            viewModelScope.launch {
+
+                autoDropJob?.cancel()
+                timerJob?.cancel()
+
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    isGameOver = true,
+                    winner = "Victoria",
+                    message = "El rival abandonó la partida"
+                )
+            }
+        }
+    }
+
+    companion object {
+        const val DROP_DELAY = 700L
+    }
+
+    private val _state = MutableStateFlow(
+        GameState()
+    )
+     val state: StateFlow<GameState> = _state.asStateFlow()
+
+    private var autoDropJob: Job? = null
+
+    private var timerJob: Job? = null
+
+
+    // Inicia la partida local.
+    fun startGame() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) {
+            return
+        }
+
+        if (currentState.isRunning) {
+            return
+        }
+
+        _state.value = currentState.copy(
+            isRunning = true,
+            message = "Partida iniciada"
+        )
+
+        startAutoDrop()
+        startTimer()
+    }
+
+    // Pausa la partida.
+    fun pauseGame() {
+        autoDropJob?.cancel()
+        autoDropJob = null
+
+        timerJob?.cancel()
+        timerJob = null
+
+        _state.value = _state.value.copy(
+            isRunning = false,
+            message = "Partida pausada"
+        )
+    }
+
+    private fun startAutoDrop() {
+        autoDropJob?.cancel()
+
+        autoDropJob = viewModelScope.launch {
+            while (_state.value.isRunning && !_state.value.isGameOver) {
+
+                delay(DROP_DELAY)
+
+                softDrop()
+
+                if (_state.value.isGameOver) {
+                    autoDropJob?.cancel()
+                    autoDropJob = null
+                }
+            }
+        }
+    }
+
+    // Inicia el contador de duración de la partida.
+//
+// Cada segundo aumenta durationSeconds.
+// También activa el mensaje especial cuando llega a 37 segundos.
+    private fun startTimer() {
+        timerJob?.cancel()
+
+        timerJob = viewModelScope.launch {
+            while (_state.value.isRunning && !_state.value.isGameOver) {
+
+                delay(1000L)
+
+                val currentState = _state.value
+                val newDuration = currentState.durationSeconds + 1
+
+                _state.value = currentState.copy(
+                    durationSeconds = newDuration,
+                    show37Message = newDuration >= 37,
+                    message = if (newDuration == 37) {
+                        "Modo 37 activado"
+                    } else {
+                        currentState.message
+                    }
+                )
+            }
+        }
+    }
+
+//Izquierda
+    fun moveLeft() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        val newPiece = currentState.currentPiece.move(
+            dx = -1,
+            dy = 0
+        )
+
+        if (TetrisEngine.isValidPosition(newPiece, currentState.board)) {
+            _state.value = currentState.copy(
+                currentPiece = newPiece,
+                message = "Movimiento a la izquierda"
+            )
+        }
+    }
+
+    //Derecha
+    fun moveRight() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        val newPiece = currentState.currentPiece.move(
+            dx = 1,
+            dy = 0
+        )
+
+        if (TetrisEngine.isValidPosition(newPiece, currentState.board)) {
+            _state.value = currentState.copy(
+                currentPiece = newPiece,
+                message = "Movimiento a la derecha"
+            )
+        }
+    }
+
+    // Baja la pieza una fila.
+    fun softDrop() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        val newPiece = currentState.currentPiece.move(
+            dx = 0,
+            dy = 1
+        )
+
+        if (TetrisEngine.isValidPosition(newPiece, currentState.board)) {
+            _state.value = currentState.copy(
+                currentPiece = newPiece,
+                message = "Bajando pieza"
+            )
+        } else {
+            fixPieceToBoard()
+        }
+    }
+
+    // Caída instantánea.
+    fun hardDrop() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        var piece = currentState.currentPiece
+
+        while (true) {
+            val nextPiece = piece.move(
+                dx = 0,
+                dy = 1
+            )
+            if (TetrisEngine.isValidPosition(nextPiece, currentState.board)) {
+                piece = nextPiece
+            } else {
+                break
+            }
+        }
+
+        _state.value = currentState.copy(
+            currentPiece = piece,
+            message = "Caída instantánea"
+        )
+
+        fixPieceToBoard()
+    }
+
+
+// Rota la pieza actual.
+    fun rotate() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        val rotatedPiece = currentState.currentPiece.rotate()
+
+        // Validamos la rotación usando TetrisEngine.
+        // Si la pieza rotada choca con pared o bloques, no se aplica.
+        if (TetrisEngine.isValidPosition(rotatedPiece, currentState.board)) {
+            _state.value = currentState.copy(
+                currentPiece = rotatedPiece,
+                message = "Pieza rotada"
+            )
+        } else {
+            _state.value = currentState.copy(
+                message = "No se puede rotar aquí"
+            )
+        }
+    }
+    fun testGarbageLine() {
+        receiveGarbage(1)
+    }
+
+    // Recibe líneas basura.
+//
+// Esta función queda lista para que luego tu compañera la conecte
+// con el evento receive_attack de Socket.IO.
+    fun receiveGarbage(lines: Int) {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        if (lines <= 0) return
+
+        val result = TetrisEngine.addGarbageLines(
+            board = currentState.board,
+            amount = lines
+        )
+
+        val currentPieceStillValid = TetrisEngine.isValidPosition(
+            piece = currentState.currentPiece,
+            board = result.board
+        )
+
+        if (result.isGameOver || !currentPieceStillValid) {
+            autoDropJob?.cancel()
+            autoDropJob = null
+
+            timerJob?.cancel()
+            timerJob = null
+
+            if (currentState.roomCode.isNotEmpty()) {
+
+                socketRepository.gameOver(
+                    currentState.roomCode
+                )
+            }
+
+            _state.value = currentState.copy(
+                board = result.board,
+                isRunning = false,
+                isGameOver = true,
+                winner = "Perdiste",
+                message = "Fin de partida"
+            )
+
+            return
+        }
+
+        _state.value = currentState.copy(
+            board = result.board,
+            message = "Ataque recibido: $lines línea(s) basura"
+        )
+    }
+
+
+    // Función temporal para probar eliminación de líneas.
+//
+// Llena dos filas con bloques normales.
+// Luego usa el motor real para limpiar líneas,
+// calcular puntaje y calcular ataque.
+    // Función temporal para probar eliminación de líneas.
+//
+// Esta función sirve para validar la tabla de ataques del práctico.
+// Cada vez que se presiona el botón, prueba una cantidad distinta:
+//
+// 1 línea  -> ataque 0
+// 2 líneas -> ataque 1
+// 3 líneas -> ataque 2
+// 4 líneas -> ataque 4
+//
+// Luego vuelve a 1.
+//
+// Esta función es solo para pruebas locales.
+// En la versión final puede quitarse o dejarse oculta.
+    fun testClearLines() {
+        val currentState = _state.value
+
+        if (currentState.isGameOver) return
+
+        val mutableBoard = currentState.board.map { row ->
+            row.toMutableList()
+        }.toMutableList()
+
+        // Tomamos la cantidad de líneas que corresponde probar ahora.
+        val testLines = currentState.testLinesToClear
+
+        // Llenamos desde abajo la cantidad de filas indicadas.
+        //
+        // Usamos valor 1 porque son bloques normales eliminables.
+        for (i in 0 until testLines) {
+            val rowIndex = TetrisEngine.BOARD_HEIGHT - 1 - i
+
+            mutableBoard[rowIndex] = MutableList(TetrisEngine.BOARD_WIDTH) { 1 }
+        }
+
+        // Usamos el motor real para limpiar líneas.
+        val cleanResult = TetrisEngine.clearCompletedLines(
+            board = mutableBoard.map { row -> row.toList() }
+        )
+
+        // Calculamos el ataque según la tabla del práctico.
+        val attack = TetrisEngine.calculateAttack(
+            linesCleared = cleanResult.linesCleared
+        )
+
+        // Calculamos cuál será la siguiente prueba.
+        //
+        // Si ahora probamos 1, la próxima será 2.
+        // Si ahora probamos 4, volvemos a 1.
+        val nextTestLines = if (testLines >= 4) {
+            1
+        } else {
+            testLines + 1
+        }
+
+        _state.value = currentState.copy(
+            board = cleanResult.board,
+            score = currentState.score + cleanResult.scoreEarned,
+            lines = currentState.lines + cleanResult.linesCleared,
+            lastAttack = attack,
+            pendingAttack = currentState.pendingAttack + attack,
+            testLinesToClear = nextTestLines,
+            message = "Prueba: ${cleanResult.linesCleared} línea(s), ataque $attack"
+        )
+    }
+    // Fija la pieza actual dentro del tablero.
+//
+// Esta función coordina varias reglas:
+// 1. Colocar la pieza en el tablero.
+// 2. Eliminar líneas normales completas.
+// 3. Calcular ataque.
+// 4. Crear una nueva pieza.
+// 5. Detectar si el jugador perdió.
+    private fun fixPieceToBoard() {
+        val currentState = _state.value
+
+        val boardWithPiece = TetrisEngine.placePieceOnBoard(
+            board = currentState.board,
+            piece = currentState.currentPiece
+        )
+
+        val cleanResult = TetrisEngine.clearCompletedLines(
+            board = boardWithPiece
+        )
+
+        val newCurrentPiece = currentState.nextPiece.copy(
+            x = 3,
+            y = 0,
+            rotation = 0
+        )
+
+        val newNextPiece = FallingPiece.random()
+
+        val attack = TetrisEngine.calculateAttack(
+            linesCleared = cleanResult.linesCleared
+        )
+
+        if (attack > 0 && currentState.roomCode.isNotEmpty()) {
+
+            socketRepository.sendAttack(
+                roomId = currentState.roomCode,
+                garbageLines = attack
+            )
+        }
+
+        if (!TetrisEngine.isValidPosition(newCurrentPiece, cleanResult.board)) {
+
+            autoDropJob?.cancel()
+            autoDropJob = null
+
+            timerJob?.cancel()
+            timerJob = null
+
+            if (currentState.roomCode.isNotEmpty()) {
+
+                socketRepository.gameOver(
+                    currentState.roomCode
+                )
+            }
+
+            _state.value = currentState.copy(
+                board = cleanResult.board,
+                score = currentState.score + cleanResult.scoreEarned,
+                lines = currentState.lines + cleanResult.linesCleared,
+                lastAttack = attack,
+                pendingAttack = currentState.pendingAttack + attack,
+                isRunning = false,
+                isGameOver = true,
+                winner = "Perdiste",
+                message = "Fin de partida"
+            )
+
+            return
+        }
+
+        _state.value = currentState.copy(
+            board = cleanResult.board,
+            currentPiece = newCurrentPiece,
+            nextPiece = newNextPiece,
+            score = currentState.score + cleanResult.scoreEarned,
+            lines = currentState.lines + cleanResult.linesCleared,
+            lastAttack = attack,
+            pendingAttack = currentState.pendingAttack + attack,
+            message = "Nueva pieza: ${newCurrentPiece.type}"
+        )
+    }
+
+    fun hasPendingAttack(): Boolean {
+        return _state.value.pendingAttack > 0
+    }
+
+    fun getPendingAttack(): Int {
+        return _state.value.pendingAttack
+    }
+
+    fun clearPendingAttack() {
+        _state.value = _state.value.copy(
+            pendingAttack = 0
+        )
+    }
+
+    fun consumePendingAttack(): Int {
+        val attack = _state.value.pendingAttack
+
+        _state.value = _state.value.copy(
+            pendingAttack = 0
+        )
+
+        return attack
+    }
+
+    fun connect() {
+        socketRepository.connect()
+
+        _state.value = _state.value.copy(
+            connectionStatus = "Conectado"
+        )
+    }
+
+    fun disconnect() {
+        socketRepository.disconnect()
+
+        _state.value = _state.value.copy(
+            connectionStatus = "Desconectado"
+        )
+    }
+
+    fun createRoom() {
+        socketRepository.createRoom()
+    }
+
+    fun joinRoom(
+        roomCode: String
+    ) {
+
+        if (roomCode.isBlank()) return
+
+        _state.value = _state.value.copy(
+            roomCode = roomCode
+        )
+
+        socketRepository.joinRoom(roomCode)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        autoDropJob?.cancel()
+        timerJob?.cancel()
+    }
+
+
+
+
+}
+
